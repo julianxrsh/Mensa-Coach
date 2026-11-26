@@ -1,0 +1,267 @@
+import os
+import re
+import json
+import datetime
+import requests
+from bs4 import BeautifulSoup
+
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+BASE_URL = "https://sws2.maxmanager.xyz"
+API_URL = f"{BASE_URL}/inc/ajax-php_konnektor.inc.php"
+
+HEADERS = {
+    "User-Agent": "MensaCoach/1.0 (GitHub Actions)",
+    "Accept-Language": "de-DE,de;q=0.9",
+}
+
+KATEGORIEN = {"Veganer Renner", "Hauptgericht", "Mensa Special", "All Time Classics"}
+
+
+def get_mensa_ids():
+    """Liest die Mensa-IDs aus dem select-Element der Hauptseite per Text-Suche."""
+    r = requests.get(BASE_URL, headers=HEADERS, timeout=15)
+    r.raise_for_status()
+    raw = r.text
+
+    flandern_id = None
+    stadtmitte_id = None
+
+    # Suche nach option-Tags rund um "FLANDERN" und "STADTMITTE"
+    for line in raw.splitlines():
+        if "FLANDERN" in line.upper():
+            m = re.search(r'value=["\'](\d+)["\']', line)
+            if m:
+                flandern_id = m.group(1)
+        if "STADTMITTE" in line.upper() and "ESSLINGEN" in line.upper():
+            m = re.search(r'value=["\'](\d+)["\']', line)
+            if m:
+                stadtmitte_id = m.group(1)
+
+    # Fallback: BeautifulSoup über gesamten select-Block
+    if not flandern_id or not stadtmitte_id:
+        soup = BeautifulSoup(raw, "html.parser")
+        for sel in soup.find_all("select"):
+            for opt in sel.find_all("option"):
+                txt = opt.get_text(strip=True).upper()
+                val = opt.get("value", "")
+                if not val.isdigit():
+                    continue
+                if "FLANDERN" in txt and not flandern_id:
+                    flandern_id = val
+                if "STADTMITTE" in txt and "ESSLINGEN" in txt and not stadtmitte_id:
+                    stadtmitte_id = val
+
+    if not flandern_id or not stadtmitte_id:
+        raise ValueError(
+            f"Mensa-IDs nicht gefunden. Flandern={flandern_id}, Stadtmitte={stadtmitte_id}"
+        )
+
+    return flandern_id, stadtmitte_id
+
+
+def get_week_dates():
+    """Gibt Montag und Freitag der aktuellen Woche zurück."""
+    today = datetime.date.today()
+    monday = today - datetime.timedelta(days=today.weekday())
+    friday = monday + datetime.timedelta(days=4)
+    return monday, friday
+
+
+def fetch_speiseplan(loc_id: str, monday: datetime.date):
+    """Ruft den Wochenspeiseplan für eine Mensa-ID ab."""
+    next_monday = monday + datetime.timedelta(days=7)
+    params = {
+        "func": "make_spl",
+        "locId": loc_id,
+        "date": monday.strftime("%Y-%m-%d"),
+        "lang": "de",
+        "startThisWeek": monday.strftime("%Y-%m-%d"),
+        "startNextWeek": next_monday.strftime("%Y-%m-%d"),
+    }
+    r = requests.get(API_URL, params=params, headers=HEADERS, timeout=20)
+    r.raise_for_status()
+    return r.text
+
+
+def parse_speiseplan(html: str, monday: datetime.date):
+    """Parst den HTML-Speiseplan und gibt eine Liste von Tagen mit Gerichten zurück."""
+    soup = BeautifulSoup(html, "html.parser")
+    tage = []
+
+    wochentage = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"]
+
+    # Jeder Tag ist ein Container mit Datum-Klasse oder th-Element
+    # MensaMax rendert Tage als Spalten; wir suchen nach Tag-Blöcken
+    tag_bloecke = soup.find_all(class_=re.compile(r"speiseplan.*tag|tag.*speiseplan", re.I))
+    if not tag_bloecke:
+        # Alternative: Suche nach date-Headern
+        tag_bloecke = soup.find_all(class_=re.compile(r"(?:^|\s)tag(?:\s|$)", re.I))
+
+    # Generischer Fallback: Zeilen mit Datums-Pattern extrahieren
+    if not tag_bloecke:
+        tag_bloecke = soup.find_all(attrs={"data-day": True})
+
+    for i, block in enumerate(tag_bloecke[:5]):
+        datum = monday + datetime.timedelta(days=i)
+        gerichte_roh = []
+
+        for zeile in block.find_all(class_=re.compile(r"speise|gericht|meal|dish|essen", re.I)):
+            kategorie_el = zeile.find(class_=re.compile(r"kategorie|category|type", re.I))
+            name_el = zeile.find(class_=re.compile(r"name|title|bezeichnung", re.I))
+            preis_el = zeile.find(class_=re.compile(r"preis|price", re.I))
+
+            if not name_el:
+                continue
+
+            kategorie = kategorie_el.get_text(strip=True) if kategorie_el else ""
+            name = name_el.get_text(strip=True)
+            preis = preis_el.get_text(strip=True) if preis_el else ""
+
+            # Nur relevante Kategorien
+            if kategorie and not any(k.lower() in kategorie.lower() for k in KATEGORIEN):
+                continue
+
+            gerichte_roh.append({
+                "kategorie": kategorie,
+                "name": name,
+                "preis_roh": preis,
+            })
+
+        if gerichte_roh or i < 5:
+            tage.append({
+                "datum": datum.strftime("%Y-%m-%d"),
+                "wochentag": wochentage[i] if i < 5 else "",
+                "gerichte_roh": gerichte_roh,
+            })
+
+    return tage
+
+
+def ki_anreichern(alle_gerichte: list[dict]) -> list[dict]:
+    """Ruft Groq einmal für alle Gerichte auf und gibt angereicherte Gerichte zurück."""
+    if not alle_gerichte:
+        return []
+
+    gerichte_text = json.dumps(alle_gerichte, ensure_ascii=False, indent=2)
+
+    prompt = f"""Du bist Ernährungsexperte. Analysiere diese Mensagerichte und ergänze für jedes Gericht folgende Felder:
+- vegan: true/false
+- vegetarisch: true/false
+- kcal_100g: geschätzte kcal pro 100g (Integer)
+- eiweiss_100g: geschätzte g Eiweiß pro 100g (Float)
+- gesundheit: Gesundheitswert 1-10 (10=sehr gesund)
+- kcal_portion: geschätzte kcal der Portion (Integer, typische Mensaportion ~400g)
+- begruendung: max. 12 Wörter, warum dieses Gericht empfehlenswert oder nicht
+
+Antworte NUR mit einem validen JSON-Array. Gleiche Reihenfolge wie die Eingabe. Jedes Objekt enthält alle Originalfelder plus die neuen Felder.
+
+Eingabe:
+{gerichte_text}"""
+
+    response = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": "openai/gpt-oss-120b",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 4096,
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+
+    inhalt = response.json()["choices"][0]["message"]["content"]
+
+    # JSON aus Antwort extrahieren
+    match = re.search(r"\[.*\]", inhalt, re.DOTALL)
+    if not match:
+        raise ValueError("Groq hat kein valides JSON zurückgegeben")
+
+    return json.loads(match.group(0))
+
+
+def preis_normalisieren(preis_roh: str) -> str:
+    """Extrahiert den Studierendenpreis aus dem Preisstring."""
+    # Typisches Format: "2,50 € / 3,20 € / 4,00 €" (Stud / Bed / Gast)
+    preise = re.findall(r"\d+[.,]\d+", preis_roh)
+    if preise:
+        return preise[0].replace(",", ".") + " €"
+    return preis_roh
+
+
+def verarbeite_mensa(loc_id: str, monday: datetime.date) -> dict:
+    """Holt und verarbeitet den Speiseplan einer Mensa."""
+    html = fetch_speiseplan(loc_id, monday)
+    tage_roh = parse_speiseplan(html, monday)
+
+    # Alle Gerichte aller Tage für einen einzigen Groq-Aufruf sammeln
+    alle_gerichte_flat = []
+    tag_grenzen = []
+    for tag in tage_roh:
+        start = len(alle_gerichte_flat)
+        alle_gerichte_flat.extend(tag["gerichte_roh"])
+        tag_grenzen.append((start, len(alle_gerichte_flat)))
+
+    angereichert = ki_anreichern(alle_gerichte_flat) if alle_gerichte_flat else []
+
+    tage_final = []
+    for i, tag in enumerate(tage_roh):
+        start, ende = tag_grenzen[i]
+        gerichte_angereichert = angereichert[start:ende]
+
+        gerichte = []
+        for g in gerichte_angereichert:
+            preis_roh = g.pop("preis_roh", "")
+            gerichte.append({
+                "kategorie": g.get("kategorie", ""),
+                "name": g.get("name", ""),
+                "preis_studierende": preis_normalisieren(preis_roh),
+                "vegan": g.get("vegan", False),
+                "vegetarisch": g.get("vegetarisch", False),
+                "kcal_100g": g.get("kcal_100g", 0),
+                "eiweiss_100g": g.get("eiweiss_100g", 0.0),
+                "gesundheit": g.get("gesundheit", 5),
+                "kcal_portion": g.get("kcal_portion", 0),
+                "begruendung": g.get("begruendung", ""),
+            })
+
+        tage_final.append({
+            "datum": tag["datum"],
+            "wochentag": tag["wochentag"],
+            "gerichte": gerichte,
+        })
+
+    return {
+        "stand": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tage": tage_final,
+    }
+
+
+def main():
+    os.makedirs("data", exist_ok=True)
+    monday, _ = get_week_dates()
+
+    print("Suche Mensa-IDs...")
+    flandern_id, stadtmitte_id = get_mensa_ids()
+    print(f"Flandernstraße ID: {flandern_id}")
+    print(f"Stadtmitte ID: {stadtmitte_id}")
+
+    print("Verarbeite Mensa Flandernstraße...")
+    flandern_data = verarbeite_mensa(flandern_id, monday)
+    with open("data/flandernstrasse.json", "w", encoding="utf-8") as f:
+        json.dump(flandern_data, f, ensure_ascii=False, indent=2)
+
+    print("Verarbeite Mensa Stadtmitte...")
+    stadtmitte_data = verarbeite_mensa(stadtmitte_id, monday)
+    with open("data/stadtmitte.json", "w", encoding="utf-8") as f:
+        json.dump(stadtmitte_data, f, ensure_ascii=False, indent=2)
+
+    print("Fertig.")
+
+
+if __name__ == "__main__":
+    main()
