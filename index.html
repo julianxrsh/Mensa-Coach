@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mensa-Coach</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e5e5e5;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    header h1 { font-size: 20px; font-weight: 700; }
+    header span { font-size: 13px; color: #6e6e73; }
+
+    .mensa-tabs {
+      display: flex;
+      gap: 8px;
+      padding: 16px 24px 0;
+    }
+
+    .mensa-tab {
+      padding: 8px 18px;
+      border-radius: 20px;
+      border: 1.5px solid #d1d1d6;
+      background: #fff;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .mensa-tab.active {
+      background: #1d1d1f;
+      color: #fff;
+      border-color: #1d1d1f;
+    }
+
+    .day-tabs {
+      display: flex;
+      gap: 6px;
+      padding: 12px 24px;
+      overflow-x: auto;
+    }
+
+    .day-tab {
+      padding: 6px 14px;
+      border-radius: 14px;
+      border: 1.5px solid #d1d1d6;
+      background: #fff;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+
+    .day-tab.active {
+      background: #0071e3;
+      color: #fff;
+      border-color: #0071e3;
+    }
+
+    .content { padding: 0 24px 32px; max-width: 680px; margin: 0 auto; }
+
+    .recommendation-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      border-left: 4px solid #0071e3;
+    }
+
+    .rec-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #0071e3;
+      margin-bottom: 6px;
+    }
+
+    .rec-name {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .rec-kategorie {
+      font-size: 13px;
+      color: #6e6e73;
+      margin-bottom: 10px;
+    }
+
+    .rec-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .badge {
+      padding: 3px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 500;
+      background: #f5f5f7;
+      color: #1d1d1f;
+    }
+
+    .badge.vegan { background: #d4f5d4; color: #1a7a1a; }
+    .badge.vegetarisch { background: #e8f5d4; color: #4a7a1a; }
+
+    .rec-begruendung {
+      font-size: 14px;
+      color: #3c3c43;
+      font-style: italic;
+      margin-bottom: 14px;
+    }
+
+    .rec-preis {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .share-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 12px;
+      padding: 8px 16px;
+      background: #f5f5f7;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      color: #1d1d1f;
+      transition: background 0.15s;
+    }
+
+    .share-btn:hover { background: #e5e5ea; }
+
+    .all-dishes { margin-top: 20px; }
+    .all-dishes h3 { font-size: 14px; color: #6e6e73; margin-bottom: 10px; font-weight: 500; }
+
+    .dish-row {
+      background: #fff;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .dish-info { flex: 1; }
+    .dish-name { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+    .dish-kat { font-size: 12px; color: #6e6e73; }
+    .dish-badges { display: flex; gap: 4px; margin-top: 4px; }
+    .dish-right { text-align: right; min-width: 60px; }
+    .dish-preis { font-size: 14px; font-weight: 600; }
+    .dish-kcal { font-size: 12px; color: #6e6e73; }
+    .score-bar { width: 40px; height: 4px; border-radius: 2px; background: #e5e5ea; margin-top: 4px; margin-left: auto; }
+    .score-fill { height: 100%; border-radius: 2px; background: #0071e3; }
+
+    .empty { text-align: center; padding: 48px 0; color: #6e6e73; font-size: 15px; }
+    .stand { font-size: 11px; color: #aeaeb2; text-align: center; padding: 8px 0 0; }
+
+    .error-msg {
+      background: #fff3f3;
+      border: 1px solid #ffcdd2;
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 16px;
+      font-size: 14px;
+      color: #c0392b;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🍽 Mensa-Coach</h1>
+  <span id="stand-header"></span>
+</header>
+
+<div class="mensa-tabs">
+  <button class="mensa-tab active" onclick="selectMensa('flandernstrasse', this)">Flandernstraße</button>
+  <button class="mensa-tab" onclick="selectMensa('stadtmitte', this)">Stadtmitte</button>
+</div>
+
+<div class="day-tabs" id="day-tabs"></div>
+
+<div class="content" id="content">
+  <div class="empty">Lade Speiseplan…</div>
+</div>
+
+<script>
+  const REPO = "julianxrsh/Mensa-Coach";
+  const BASE = `https://raw.githubusercontent.com/${REPO}/main/data/`;
+
+  let state = {
+    mensa: "flandernstrasse",
+    data: {},
+    selectedDay: null,
+  };
+
+  async function loadMensa(mensa) {
+    if (state.data[mensa]) return state.data[mensa];
+    const url = `${BASE}${mensa}.json?t=${Date.now()}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const json = await r.json();
+    state.data[mensa] = json;
+    return json;
+  }
+
+  function score(g) {
+    // Priorität: Gesundheit (40%), Eiweiß (30%), Vegan/Vegi (20%), Kcal-Kontrolle (10%)
+    const gesundheit = (g.gesundheit || 5) / 10;
+    const eiweiss = Math.min((g.eiweiss_100g || 0) / 25, 1);
+    const vegan_bonus = g.vegan ? 1 : (g.vegetarisch ? 0.6 : 0);
+    const kcal = g.kcal_portion || 500;
+    const kcal_score = kcal > 300 && kcal < 800 ? 1 : 0.5;
+    return 0.4 * gesundheit + 0.3 * eiweiss + 0.2 * vegan_bonus + 0.1 * kcal_score;
+  }
+
+  function todayIndex(tage) {
+    const today = new Date().toISOString().slice(0, 10);
+    const idx = tage.findIndex(t => t.datum === today);
+    return idx >= 0 ? idx : 0;
+  }
+
+  function renderDayTabs(tage, selectedIdx) {
+    const container = document.getElementById("day-tabs");
+    container.innerHTML = tage.map((t, i) => `
+      <button class="day-tab ${i === selectedIdx ? 'active' : ''}"
+        onclick="selectDay(${i})">${t.wochentag.slice(0, 2)} ${t.datum.slice(5)}</button>
+    `).join("");
+  }
+
+  function renderDay(tag) {
+    if (!tag || !tag.gerichte || tag.gerichte.length === 0) {
+      document.getElementById("content").innerHTML = `<div class="empty">Kein Speiseplan für diesen Tag verfügbar.</div>`;
+      return;
+    }
+
+    const gerichte = tag.gerichte;
+    const sorted = [...gerichte].sort((a, b) => score(b) - score(a));
+    const top = sorted[0];
+    const rest = sorted.slice(1);
+
+    const mailSubject = encodeURIComponent(`Mensa-Tipp: ${top.name}`);
+    const mailBody = encodeURIComponent(
+      `Hey, schau mal was die KI heute empfiehlt:\n\n${top.name}\n${top.begruendung}\n${top.preis_studierende}\n\nMensa-Coach: https://${REPO.split('/')[0]}.github.io/${REPO.split('/')[1]}/`
+    );
+
+    const topScoreVal = score(top);
+
+    document.getElementById("content").innerHTML = `
+      <div class="recommendation-card">
+        <div class="rec-label">🤖 KI-Empfehlung des Tages</div>
+        <div class="rec-name">${top.name}</div>
+        <div class="rec-kategorie">${top.kategorie}</div>
+        <div class="rec-meta">
+          ${top.vegan ? '<span class="badge vegan">🌱 Vegan</span>' : ''}
+          ${!top.vegan && top.vegetarisch ? '<span class="badge vegetarisch">🥚 Vegetarisch</span>' : ''}
+          ${top.kcal_portion ? `<span class="badge">⚡ ${top.kcal_portion} kcal</span>` : ''}
+          ${top.eiweiss_100g ? `<span class="badge">💪 ${top.eiweiss_100g}g Eiweiß/100g</span>` : ''}
+          ${top.gesundheit ? `<span class="badge">❤️ Gesundheit ${top.gesundheit}/10</span>` : ''}
+        </div>
+        ${top.begruendung ? `<div class="rec-begruendung">"${top.begruendung}"</div>` : ''}
+        <div class="rec-preis">${top.preis_studierende}</div>
+        <a class="share-btn" href="mailto:?subject=${mailSubject}&body=${mailBody}">
+          📧 Per Mail teilen
+        </a>
+      </div>
+
+      ${rest.length > 0 ? `
+      <div class="all-dishes">
+        <h3>Weitere Gerichte</h3>
+        ${rest.map(g => {
+          const s = score(g);
+          return `<div class="dish-row">
+            <div class="dish-info">
+              <div class="dish-name">${g.name}</div>
+              <div class="dish-kat">${g.kategorie}</div>
+              <div class="dish-badges">
+                ${g.vegan ? '<span class="badge vegan">🌱</span>' : ''}
+                ${!g.vegan && g.vegetarisch ? '<span class="badge vegetarisch">🥚</span>' : ''}
+                ${g.kcal_portion ? `<span class="badge">${g.kcal_portion} kcal</span>` : ''}
+              </div>
+            </div>
+            <div class="dish-right">
+              <div class="dish-preis">${g.preis_studierende}</div>
+              <div class="dish-kcal">Score ${Math.round(s * 100)}%</div>
+              <div class="score-bar"><div class="score-fill" style="width:${Math.round(s*100)}%"></div></div>
+            </div>
+          </div>`;
+        }).join("")}
+      </div>` : ''}
+
+      <div class="stand" id="stand-footer"></div>
+    `;
+  }
+
+  async function selectMensa(mensa, btn) {
+    state.mensa = mensa;
+    document.querySelectorAll(".mensa-tab").forEach(b => b.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    document.getElementById("content").innerHTML = `<div class="empty">Lade…</div>`;
+    await render();
+  }
+
+  function selectDay(idx) {
+    state.selectedDay = idx;
+    const data = state.data[state.mensa];
+    if (!data) return;
+    renderDayTabs(data.tage, idx);
+    renderDay(data.tage[idx]);
+    updateStand(data.stand);
+  }
+
+  function updateStand(stand) {
+    const d = stand ? new Date(stand).toLocaleString("de-DE", {timeZone: "Europe/Berlin"}) : "";
+    const el1 = document.getElementById("stand-header");
+    const el2 = document.getElementById("stand-footer");
+    if (el1) el1.textContent = d ? `Stand: ${d}` : "";
+    if (el2) el2.textContent = d ? `Zuletzt aktualisiert: ${d}` : "";
+  }
+
+  async function render() {
+    try {
+      const data = await loadMensa(state.mensa);
+      const tage = data.tage || [];
+      if (tage.length === 0) {
+        document.getElementById("content").innerHTML = `<div class="empty">Keine Daten verfügbar.</div>`;
+        return;
+      }
+      const idx = state.selectedDay !== null ? Math.min(state.selectedDay, tage.length - 1) : todayIndex(tage);
+      state.selectedDay = idx;
+      renderDayTabs(tage, idx);
+      renderDay(tage[idx]);
+      updateStand(data.stand);
+    } catch (e) {
+      document.getElementById("content").innerHTML = `
+        <div class="error-msg">Speiseplan konnte nicht geladen werden.<br><small>${e.message}</small></div>`;
+      document.getElementById("day-tabs").innerHTML = "";
+    }
+  }
+
+  render();
+</script>
+</body>
+</html>
